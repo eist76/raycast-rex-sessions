@@ -5,7 +5,9 @@ import {
   Action,
   ActionPanel,
   Alert,
+  Color,
   Icon,
+  Image,
   Keyboard,
   List,
   closeMainWindow,
@@ -26,17 +28,12 @@ interface Preferences {
   includeZoxide: boolean;
 }
 
-const ICONS: Record<Item["kind"], Icon> = {
-  rex: Icon.Terminal,
+// Matches the sesh extension: a bolt for open sessions, a gear for config, a folder for directories.
+const ICONS: Record<Item["kind"], Image.ImageLike> = {
+  rex: { source: Icon.Bolt, tintColor: Color.Blue },
   sesh: Icon.Gear,
   dir: Icon.Folder,
 };
-
-const SECTIONS: { kind: Item["kind"]; title: string }[] = [
-  { kind: "rex", title: "Open Sessions" },
-  { kind: "sesh", title: "Sesh Config" },
-  { kind: "dir", title: "Directories" },
-];
 
 export default function ConnectCommand() {
   const prefs = getPreferenceValues<Preferences>();
@@ -92,53 +89,41 @@ export default function ConnectCommand() {
   );
 
   return (
-    <List isLoading={isLoading} searchBarPlaceholder="Search sessions and directories">
+    <List isLoading={isLoading} searchBarPlaceholder="Search...">
       <List.EmptyView
-        icon={Icon.Terminal}
+        icon={Icon.Bolt}
         title="Nothing to show"
         description="Start Rex, then press ⌘R."
         actions={<ActionPanel>{refresh}</ActionPanel>}
       />
-      {SECTIONS.map(({ kind, title }) => (
-        <List.Section key={kind} title={title}>
-          {(data ?? [])
-            .filter((item) => item.kind === kind)
-            .map((item) => (
-              <List.Item
-                key={item.id}
-                title={item.title}
-                icon={ICONS[item.kind]}
-                keywords={[item.label]}
-                accessories={
-                  item.windows !== undefined
-                    ? [{ icon: Icon.AppWindow, text: String(item.windows), tooltip: "Tabs" }]
-                    : item.startup
-                      ? [{ tag: item.startup, tooltip: "Startup command" }]
-                      : []
-                }
-                actions={
-                  <ActionPanel>
-                    <Action
-                      title={item.kind === "rex" ? "Open Session" : "Create Session"}
-                      icon={Icon.ArrowRight}
-                      onAction={() => onConnect(item)}
-                    />
-                    {item.path && <Action.CopyToClipboard title="Copy Path" content={item.path} />}
-                    {item.kind === "rex" && (
-                      <Action
-                        title="Close Session"
-                        icon={Icon.XMarkCircle}
-                        style={Action.Style.Destructive}
-                        shortcut={{ modifiers: ["ctrl"], key: "x" }}
-                        onAction={() => onKill(item)}
-                      />
-                    )}
-                    {refresh}
-                  </ActionPanel>
-                }
-              />
-            ))}
-        </List.Section>
+      {(data ?? []).map((item) => (
+        <List.Item
+          key={item.id}
+          title={item.title}
+          icon={ICONS[item.kind]}
+          keywords={[item.label]}
+          accessories={
+            item.windows !== undefined
+              ? [{ icon: Icon.AppWindow, text: String(item.windows), tooltip: item.windows === 1 ? "Tab" : "Tabs" }]
+              : []
+          }
+          actions={
+            <ActionPanel>
+              <Action title="Connect to Session" onAction={() => onConnect(item)} />
+              {item.path && <Action.CopyToClipboard title="Copy Path" content={item.path} />}
+              {item.kind === "rex" && (
+                <Action
+                  title="Close Session"
+                  icon={Icon.XMarkCircle}
+                  style={Action.Style.Destructive}
+                  shortcut={{ modifiers: ["ctrl"], key: "x" }}
+                  onAction={() => onKill(item)}
+                />
+              )}
+              {refresh}
+            </ActionPanel>
+          }
+        />
       ))}
     </List>
   );
