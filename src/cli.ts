@@ -3,6 +3,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
+  existingSessionId,
   Item,
   mergeItems,
   newSessionArgs,
@@ -77,7 +78,11 @@ export async function loadItems(run: Run, home: string, includeZoxide: boolean):
 
 /** Show the item's session in the Rex app, creating it first when it isn't open. */
 export async function connect(run: Run, item: Item, shell: string): Promise<void> {
-  let sessionId = item.sessionId;
+  // The list may be stale, so check the live sessions before creating one.
+  const { sessions } = JSON.parse(await run("rex", ["--autostart=false", "ls", "--json"])) as {
+    sessions: RexSession[];
+  };
+  let sessionId = existingSessionId(item, sessions);
   if (!sessionId) {
     const created = JSON.parse(await run("rex", newSessionArgs(item, shell))) as { session_id: string };
     sessionId = created.session_id;

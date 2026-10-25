@@ -71,6 +71,11 @@ export function mergeItems(rex: Item[], sesh: Item[], dirs: Item[]): Item[] {
   return [...rex, ...visibleSesh, ...visibleDirs].filter((i) => !seen.has(i.id) && seen.add(i.id));
 }
 
+/** The open session an item refers to: its own, or one already created with its label. */
+export function existingSessionId(item: Item, open: RexSession[]): string | undefined {
+  return item.sessionId ?? open.find((session) => session.label === item.label)?.session_id;
+}
+
 /** Arguments for `rex new`; a startup command runs first and then leaves an interactive shell. */
 export function newSessionArgs(item: Item, shell: string): string[] {
   const args = ["new", item.label, "-c", item.path ?? "", "--json"];

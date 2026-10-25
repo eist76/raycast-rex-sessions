@@ -3,7 +3,15 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { expandPath, mergeItems, newSessionArgs, toRexItem, toSeshItems, toZoxideItems } from "./items";
+import {
+  existingSessionId,
+  expandPath,
+  mergeItems,
+  newSessionArgs,
+  toRexItem,
+  toSeshItems,
+  toZoxideItems,
+} from "./items";
 import { loadItems, runner } from "./cli";
 
 describe("mergeItems", () => {
@@ -38,6 +46,24 @@ describe("mergeItems", () => {
   it("gives every item a unique id", () => {
     const ids = mergeItems(rex, sesh, dirs).map((i) => i.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("existingSessionId", () => {
+  const open = [{ session_id: "session:1", label: "Downloads 📥" }];
+
+  it("finds an open session with the item's label, so picking twice never duplicates", () => {
+    const [entry] = toSeshItems([{ Name: "Downloads 📥", Path: "/home/me/Downloads", StartupCommand: "yazi" }]);
+    expect(existingSessionId(entry, open)).toBe("session:1");
+  });
+
+  it("uses the item's own session id when it already has one", () => {
+    expect(existingSessionId(toRexItem({ session_id: "session:9", label: "x" }), open)).toBe("session:9");
+  });
+
+  it("returns nothing when no session has that label", () => {
+    const [dir] = toZoxideItems(["/home/me/src/app"], "/home/me");
+    expect(existingSessionId(dir, open)).toBeUndefined();
   });
 });
 
