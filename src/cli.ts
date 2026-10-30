@@ -13,6 +13,7 @@ import {
   SeshEntry,
   toRexItem,
   toSeshItems,
+  toTabSummaries,
   toZoxideItems,
 } from "./items";
 
@@ -68,24 +69,35 @@ async function rawSessions(run: Run, server?: string): Promise<RexSession[]> {
 
 async function rexSessions(run: Run, server?: string): Promise<Item[]> {
   const sessions = await rawSessions(run, server);
-  return Promise.all(
-    sessions.map(async (session) => {
-      try {
-        const view = JSON.parse(
-          await run("rex", [
-            ...serverArgs(server),
-            "api",
-            "call",
-            "session.view",
-            JSON.stringify({ session_id: session.session_id }),
-          ]),
-        ) as { windows: unknown[] };
-        return toRexItem(session, view.windows.length, server);
-      } catch {
-        return toRexItem(session, undefined, server);
+  return mapLimited(sessions, 4, async (session) => {
+    try {
+      const view = JSON.parse(
+        await run("rex", [
+          ...serverArgs(server),
+          "api",
+          "call",
+          "session.view",
+          JSON.stringify({ session_id: session.session_id }),
+        ]),
+      ) as { session_id?: unknown; windows?: unknown; active_window_id?: unknown } | null;
+      if (
+        !view ||
+        Array.isArray(view) ||
+        typeof view !== "object" ||
+        (view.windows != null && !Array.isArray(view.windows)) ||
+        (view.session_id != null && view.session_id !== session.session_id)
+      ) {
+        throw new Error("Invalid session view response");
       }
-    }),
-  );
+      // A session with no windows is valid; Rex may omit `windows` or send null.
+      const windows = Array.isArray(view.windows) ? view.windows : [];
+      const tabs = toTabSummaries(view.windows, view.active_window_id);
+      if (tabs.length !== windows.length) throw new Error("Invalid windows in session view");
+      return toRexItem(session, windows.length, server, tabs);
+    } catch {
+      return toRexItem(session, undefined, server);
+    }
+  });
 }
 
 /** Host labels from `rex hosts --json`, in the order Rex lists them. */
@@ -149,11 +161,51 @@ async function zoxideDirs(run: Run, home: string): Promise<Item[]> {
   }
 }
 
+/** Bound view requests per host while retaining Rex's session order. */
+async function mapLimited<T, U>(items: T[], limit: number, visit: (item: T) => Promise<U>): Promise<U[]> {
+  const results: U[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await visit(items[index]);
+      }
+    }),
+  );
+  return results;
+}
+
+// A command keeps its runner stable. Manual refresh, host retry and polling then
+// share an active load instead of launching duplicate child processes.
+const activeLoads = new WeakMap<Run, Map<string, Promise<LoadedItems>>>();
+export function loadItems(
+  run: Run,
+  home: string,
+  includeZoxide: boolean,
+  includeRemote = true,
+  includeSesh = false,
+): Promise<LoadedItems> {
+  let loads = activeLoads.get(run);
+  if (!loads) {
+    loads = new Map();
+    activeLoads.set(run, loads);
+  }
+  const key = JSON.stringify([home, includeZoxide, includeRemote, includeSesh]);
+  const active = loads.get(key);
+  if (active) return active;
+  const promise = loadItemsUncached(run, home, includeZoxide, includeRemote, includeSesh).finally(() =>
+    loads.delete(key),
+  );
+  loads.set(key, promise);
+  return promise;
+}
+
 /**
  * Rex sessions are required; sesh and zoxide are optional and quietly left out when missing.
  * A host that cannot be reached is reported instead of hiding the rest of the list.
  */
-export async function loadItems(
+async function loadItemsUncached(
   run: Run,
   home: string,
   includeZoxide: boolean,
@@ -195,6 +247,11 @@ export async function connect(run: Run, item: Item, shell: string): Promise<void
     sessionId = created.session_id;
   }
   await run("rex", ["do", "session.select", `session_id=${sessionId}`]);
+}
+
+/** Show one tab of a session in the Rex app, including a tab on a remote host. */
+export async function selectTab(run: Run, sessionId: string, windowId: string): Promise<void> {
+  await run("rex", ["do", "session.select", `session_id=${sessionId}`, `window_id=${windowId}`]);
 }
 
 export async function killSession(run: Run, item: Item): Promise<void> {

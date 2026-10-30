@@ -11,6 +11,7 @@ import {
   newSessionArgs,
   toRexItem,
   toSeshItems,
+  toTabSummaries,
   toZoxideItems,
 } from "./items";
 import { loadItems, runner } from "./cli";
@@ -67,6 +68,67 @@ describe("mergeItems", () => {
     const items = mergeItems([first, second], [], []);
     expect(items).toHaveLength(2);
     expect(new Set(items.map((i) => i.id)).size).toBe(2);
+  });
+});
+
+describe("toTabSummaries", () => {
+  it("keeps tab and pane labels in Rex's order and marks the active window", () => {
+    const tabs = toTabSummaries(
+      [
+        {
+          window_id: "window:one",
+          label: "Server",
+          layers: [{ blocks: [{ label: "api" }, { label: "logs" }] }],
+        },
+        { window_id: "window:two", layers: [{ blocks: [{ label: "test" }] }] },
+      ],
+      "window:two",
+    );
+
+    expect(tabs).toEqual([
+      {
+        windowId: "window:one",
+        label: "Server",
+        active: false,
+        paneLabels: ["api", "logs"],
+        paneCount: 2,
+        panes: [
+          { blockId: undefined, label: "api", terminal: false },
+          { blockId: undefined, label: "logs", terminal: false },
+        ],
+      },
+      {
+        windowId: "window:two",
+        label: "Tab 2",
+        active: true,
+        paneLabels: ["test"],
+        paneCount: 1,
+        panes: [{ blockId: undefined, label: "test", terminal: false }],
+      },
+    ]);
+  });
+
+  it("ignores malformed windows instead of losing the whole session", () => {
+    const tabs = toTabSummaries(
+      [null, "window", { label: "no id" }, { window_id: "window:ok", layers: [{ blocks: [{ label: 7 }] }] }],
+      undefined,
+    );
+
+    expect(tabs).toEqual([
+      {
+        windowId: "window:ok",
+        label: "Tab 4",
+        active: false,
+        paneLabels: ["Pane 1"],
+        paneCount: 1,
+        panes: [{ blockId: undefined, label: "Pane 1", terminal: false }],
+      },
+    ]);
+  });
+
+  it("returns nothing when the view has no window array", () => {
+    expect(toTabSummaries(null)).toEqual([]);
+    expect(toTabSummaries({ windows: [] })).toEqual([]);
   });
 });
 

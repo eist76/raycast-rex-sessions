@@ -164,6 +164,25 @@ function parseSessionView(raw: unknown, target: { sessionId: string; server?: st
   };
 }
 
+/** The server user's home directory, used to shorten paths in the picker. */
+function reportedHome(raw: unknown): string | undefined {
+  if (!isRecord(raw) || typeof raw.home !== "string") return undefined;
+  const home = raw.home.trim();
+  return home || undefined;
+}
+
+/** The foreground program first, then its child or ancestors as a graceful fallback. */
+function foregroundProcessName(raw: unknown): string | undefined {
+  if (!isRecord(raw)) return undefined;
+  const ancestors = Array.isArray(raw.ancestors) ? raw.ancestors : [];
+  for (const process of [raw.foreground, ...ancestors, raw.child]) {
+    if (isRecord(process) && typeof process.name === "string" && process.name.trim()) {
+      return process.name.trim();
+    }
+  }
+  return undefined;
+}
+
 /** The live foreground command's directory first, then its child or ancestors when one reports it. */
 function processWorkingDirectory(raw: unknown): string | undefined {
   if (!isRecord(raw)) return undefined;
@@ -195,20 +214,34 @@ function reportedWorkingDirectory(raw: unknown): string | undefined {
   }
 }
 
-async function readPaneCwd(run: Run, server: string | undefined, sessionId: string, pane: SessionPane): Promise<void> {
-  if (!pane.terminal || !pane.blockId) return;
-  const blockId = pane.blockId;
+export interface PaneWorkingDirectory {
+  cwd?: string;
+  /** The server user's home, when the process table reported it. */
+  home?: string;
+  /** The foreground program's name, such as nvim or zsh. */
+  process?: string;
+  source?: CwdSource;
+  error?: string;
+}
+
+/** Read one terminal pane's directory: the live process first, then its last reported pwd. */
+export async function readWorkingDirectory(
+  run: Run,
+  server: string | undefined,
+  sessionId: string,
+  blockId: string,
+): Promise<PaneWorkingDirectory> {
   const baseArgs = [...serverArgs(server), "block", "call", "-s", sessionId, "-b", blockId];
 
   let processFailure: unknown;
+  let home: string | undefined;
+  let processName: string | undefined;
   try {
     const process = JSON.parse(await run("rex", [...baseArgs, "process"])) as unknown;
+    home = reportedHome(process);
+    processName = foregroundProcessName(process);
     const cwd = processWorkingDirectory(process);
-    if (cwd) {
-      pane.cwd = cwd;
-      pane.cwdSource = "process";
-      return;
-    }
+    if (cwd) return { cwd, home, process: processName, source: "process" };
   } catch (error) {
     processFailure = error;
   }
@@ -217,19 +250,27 @@ async function readPaneCwd(run: Run, server: string | undefined, sessionId: stri
   try {
     const reported = JSON.parse(await run("rex", [...baseArgs, "pwd"])) as unknown;
     const cwd = reportedWorkingDirectory(reported);
-    if (cwd) {
-      pane.cwd = cwd;
-      pane.cwdSource = "pwd";
-      return;
-    }
+    if (cwd) return { cwd, home, process: processName, source: "pwd" };
   } catch (error) {
     pwdFailure = error;
   }
 
   const failure = pwdFailure ?? processFailure;
-  pane.cwdError = failure
-    ? `Couldn't read the working directory: ${errorText(failure)}`
-    : "No working directory was reported for this pane";
+  return {
+    home,
+    process: processName,
+    error: failure
+      ? `Couldn't read the working directory: ${errorText(failure)}`
+      : "No working directory was reported for this pane",
+  };
+}
+
+async function readPaneCwd(run: Run, server: string | undefined, sessionId: string, pane: SessionPane): Promise<void> {
+  if (!pane.terminal || !pane.blockId) return;
+  const result = await readWorkingDirectory(run, server, sessionId, pane.blockId);
+  pane.cwd = result.cwd;
+  pane.cwdSource = result.source;
+  pane.cwdError = result.error;
 }
 
 /** Run at most `limit` visits at once, preserving one result per item and no extra ordering guarantees. */

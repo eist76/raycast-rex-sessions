@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import type { Run } from "./cli";
 import { Item, toRexItem, toSeshItems } from "./items";
-import { loadSessionDetails } from "./session-details";
+import { loadSessionDetails, readWorkingDirectory } from "./session-details";
 
 interface Call {
   program: string;
@@ -399,5 +399,38 @@ describe("loadSessionDetails", () => {
     expect(maxInFlight).toBeGreaterThan(1);
     expect(calls).toHaveLength(13);
     expect(details.tabs[0].panes.map((pane) => pane.cwd)).toEqual(blocks.map((block) => `/work/${block.block_id}`));
+  });
+});
+
+describe("readWorkingDirectory", () => {
+  it("reports the server user's home alongside a live directory", async () => {
+    const { run } = fakeRun((_program, args) => {
+      if (args.join(" ") === blockCall("block:api", "process", "pi")) {
+        return json({ home: "/home/eist", foreground: { name: "nvim", cwd: "/home/eist/app" } });
+      }
+      throw new Error(`unexpected rex ${args.join(" ")}`);
+    });
+
+    await expect(readWorkingDirectory(run, "pi", SESSION_ID, "block:api")).resolves.toEqual({
+      cwd: "/home/eist/app",
+      home: "/home/eist",
+      process: "nvim",
+      source: "process",
+    });
+  });
+
+  it("keeps the home when falling back to the reported directory", async () => {
+    const { run } = fakeRun((_program, args) => {
+      const joined = args.join(" ");
+      if (joined === blockCall("block:api", "process", "pi")) return json({ home: "/home/eist" });
+      if (joined === blockCall("block:api", "pwd", "pi")) return json({ pwd: "file://host/home/eist/app" });
+      throw new Error(`unexpected rex ${joined}`);
+    });
+
+    await expect(readWorkingDirectory(run, "pi", SESSION_ID, "block:api")).resolves.toEqual({
+      cwd: "/home/eist/app",
+      home: "/home/eist",
+      source: "pwd",
+    });
   });
 });

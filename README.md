@@ -7,10 +7,20 @@ the terminal multiplexer. It does for Rex what the
 **Connect to Rex Session** shows one searchable list:
 
 - **Favorites:** pinned sessions first, saved across command launches.
-- **Open Sessions:** all remaining local and remote sessions, with tab counts
-  and searchable host labels.
+- **Open Sessions:** all remaining local and remote sessions, with tab names,
+  tab counts, and searchable host labels.
 - **Sesh Config** (off by default): optionally include entries from your [sesh](https://github.com/joshmedeski/sesh) config using **Include sesh config entries** in preferences.
 - **Directories:** your [zoxide](https://github.com/ajeetdsouza/zoxide) directories.
+
+Select a session and use <kbd>⌥</kbd> <kbd>←</kbd> / <kbd>⌥</kbd> <kbd>→</kbd>
+to choose one of its tabs; press <kbd>Enter</kbd> to open that session at the
+selected tab. The row shows the chosen tab, its position, the foreground process,
+and—once read—the tab's working directory, so similarly named tabs are easy to
+tell apart. Paths under the server user's home are shortened to `~`, including
+remote hosts. The choice is remembered per session. Bare arrow keys stay with the search field, so
+the Option-arrow shortcut keeps typing and caret movement intact while still
+letting you cycle tabs from the list. Only the selected tab's directory is read,
+on demand; automatic refresh stays cheap.
 
 Press <kbd>Enter</kbd> to show the session in the Rex app and bring Rex to the
 front. A sesh entry or directory that isn't open yet becomes a new session
@@ -22,6 +32,7 @@ reached is shown as a warning while the rest of the list stays available.
 | Shortcut                               | Action                             |
 | -------------------------------------- | ---------------------------------- |
 | <kbd>Enter</kbd>                       | Open or create the session         |
+| <kbd>⌥</kbd> <kbd>←</kbd> / <kbd>⌥</kbd> <kbd>→</kbd> | Choose previous / next tab |
 | <kbd>⌘</kbd> <kbd>N</kbd>              | New local or remote session        |
 | <kbd>⌘</kbd> <kbd>E</kbd>              | Rename the selected session        |
 | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>F</kbd> | Pin or unpin the selected session  |
@@ -32,7 +43,12 @@ reached is shown as a warning while the rest of the list stays available.
 
 Use the host dropdown to show **All Hosts**, **This Mac**, or a configured remote
 host. Local directory and sesh entries appear only under All Hosts or This Mac.
-Empty and unreachable hosts remain available in the dropdown.
+Empty and unreachable hosts remain available in the dropdown. Search matches
+session, host, path, tab, and pane names. The session list revalidates every 30
+seconds while open, skipping ticks during an active load;
+**⌘R** refreshes immediately or joins the active load. Session views are read at
+most four at a time per host; no pane working-directory queries run during
+automatic refresh.
 
 **New Session** (⌘N) asks for a name and host, with an optional working directory
 and startup command. Paths and commands run on the selected machine. After the
@@ -50,7 +66,8 @@ filter; offline favorites are retained and reappear when their sessions return.
 **Session Details** (⌘I) loads tabs, panes, and working directories on demand.
 Directories marked **live** come from process information; **reported** paths are
 what the terminal last reported and may be stale. Unavailable paths are shown
-explicitly. Use Refresh to update the snapshot.
+explicitly. Press <kbd>Enter</kbd> on a pane to show its tab in Rex, or use
+**⌘C** to copy its working directory. Use Refresh to update the snapshot.
 
 **Check Host Connection** (⌘⇧H) opens a host list with an explicit connection
 check and **Retry Session Listing** (⌘R). It is also available from warnings and

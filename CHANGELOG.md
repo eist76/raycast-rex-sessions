@@ -10,5 +10,7 @@
 - Disable sesh entries by default and use stable list IDs for keyboard navigation.
 
 - Pin open sessions as persistent favorites above other sessions.
+- Choose a session's tab inline with ⌥← / ⌥→, identify it by its foreground process and working directory, and open it with Enter; Session Details can show a pane's tab too.
 - Inspect tabs, panes, and working directories on demand, including directory provenance.
 - Check host reachability and retry session listing, preserving visible partial failures.
+- Refresh the session list every 30 seconds while open, without overlapping loads.

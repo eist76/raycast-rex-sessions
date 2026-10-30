@@ -1,8 +1,19 @@
 // ABOUTME: Raycast view for one Rex session's tabs and each terminal pane's working directory.
 // ABOUTME: Loads only when opened, with refresh, pane errors and provenance for reported directories.
-import { Action, ActionPanel, Color, Icon, Keyboard, List } from "@raycast/api";
+import {
+  Action,
+  ActionPanel,
+  Color,
+  Icon,
+  Keyboard,
+  List,
+  closeMainWindow,
+  open,
+  showToast,
+  Toast,
+} from "@raycast/api";
 import { showFailureToast, usePromise } from "@raycast/utils";
-import type { Run } from "./cli";
+import { selectTab, type Run } from "./cli";
 import type { Item } from "./items";
 import { loadSessionDetails } from "./session-details";
 import type { SessionPane, SessionTab } from "./session-details";
@@ -10,6 +21,8 @@ import type { SessionPane, SessionTab } from "./session-details";
 export interface SessionDetailsViewProps {
   run: Run;
   item: Item;
+  /** The app to bring to the front after showing a tab. */
+  rexApp: string;
 }
 
 function hostName(item: Item): string {
@@ -41,7 +54,7 @@ function paneAccessories(pane: SessionPane): List.Item.Accessory[] {
   return accessories;
 }
 
-export default function SessionDetailsView({ run, item }: SessionDetailsViewProps) {
+export default function SessionDetailsView({ run, item, rexApp }: SessionDetailsViewProps) {
   const { data, isLoading, error, revalidate } = usePromise(
     (run: Run, item: Item) => loadSessionDetails(run, item),
     [run, item],
@@ -51,6 +64,20 @@ export default function SessionDetailsView({ run, item }: SessionDetailsViewProp
       },
     },
   );
+
+  async function showTab(tab: SessionTab): Promise<void> {
+    if (!data) return;
+    const where = item.server ? ` on ${item.server}` : "";
+    const toast = await showToast({ style: Toast.Style.Animated, title: `Opening ${tab.label}${where}` });
+    try {
+      await selectTab(run, data.sessionId, tab.windowId);
+      await open(rexApp);
+      await toast.hide();
+      await closeMainWindow({ clearRootSearch: true });
+    } catch (failure) {
+      await showFailureToast(failure, { title: `Couldn't open ${tab.label}${where}` });
+    }
+  }
 
   const label = data?.label ?? item.label;
   const host = hostName(item);
@@ -99,7 +126,12 @@ export default function SessionDetailsView({ run, item }: SessionDetailsViewProp
                 id={`${tab.windowId}:empty`}
                 title="No panes in this tab"
                 icon={Icon.MinusCircle}
-                actions={actions}
+                actions={
+                  <ActionPanel>
+                    <Action title="Show Tab in Rex" icon={Icon.AppWindow} onAction={() => showTab(tab)} />
+                    {refresh}
+                  </ActionPanel>
+                }
               />
             ) : (
               tab.panes.map((pane, index) => {
@@ -115,7 +147,14 @@ export default function SessionDetailsView({ run, item }: SessionDetailsViewProp
                     accessories={paneAccessories(pane)}
                     actions={
                       <ActionPanel>
-                        {pane.cwd && <Action.CopyToClipboard title="Copy Working Directory" content={pane.cwd} />}
+                        <Action title="Show Tab in Rex" icon={Icon.AppWindow} onAction={() => showTab(tab)} />
+                        {pane.cwd && (
+                          <Action.CopyToClipboard
+                            title="Copy Working Directory"
+                            content={pane.cwd}
+                            shortcut={Keyboard.Shortcut.Common.Copy}
+                          />
+                        )}
                         {pane.blockId && <Action.CopyToClipboard title="Copy Block ID" content={pane.blockId} />}
                         {item.sessionId && <Action.CopyToClipboard title="Copy Session ID" content={item.sessionId} />}
                         {refresh}

@@ -1,7 +1,7 @@
 // ABOUTME: Focused tests for discovering local and remote sessions and targeting the right server.
 // ABOUTME: Every Rex call is mocked; no test touches a real session or host.
 import { describe, expect, it } from "vitest";
-import { connect, killSession, loadItems, Run } from "./cli";
+import { connect, killSession, loadItems, Run, selectTab } from "./cli";
 import { toRexItem, toSeshItems } from "./items";
 
 interface Call {
@@ -49,7 +49,12 @@ describe("loadItems", () => {
       }
       if (args.includes("session.view")) {
         const id = JSON.parse(args[args.length - 1]).session_id;
-        return json({ windows: id === "session:alpha" ? [{}, {}, {}] : [{}, {}] });
+        return json({
+          windows:
+            id === "session:alpha"
+              ? [{ window_id: "w:1" }, { window_id: "w:2" }, { window_id: "w:3" }]
+              : [{ window_id: "w:1" }, { window_id: "w:2" }],
+        });
       }
       if (isLocalLs(args)) return json({ sessions: [{ session_id: "session:local", label: "same" }] });
       if (isHostLs(args, "alpha")) return json({ sessions: [{ session_id: "session:alpha", label: "same" }] });
@@ -78,7 +83,7 @@ describe("loadItems", () => {
       if (isLocalLs(args)) return json({ sessions: [{ session_id: "session:local", label: "mine" }] });
       if (isHostLs(args, "alpha")) throw new Error("connection refused");
       if (isHostLs(args, "beta")) return json({ sessions: [{ session_id: "session:beta", label: "theirs" }] });
-      if (args.includes("session.view")) return json({ windows: [{}] });
+      if (args.includes("session.view")) return json({ windows: [{ window_id: "w:1" }] });
       throw new Error(`unexpected rex ${args.join(" ")}`);
     });
 
@@ -96,7 +101,7 @@ describe("loadItems", () => {
       if (args[0] === "hosts") return json({ hosts: [{ host: { label: "alpha" } }] });
       if (isLocalLs(args)) throw new Error("no local server");
       if (isHostLs(args, "alpha")) return json({ sessions: [{ session_id: "session:alpha", label: "remote" }] });
-      if (args.includes("session.view")) return json({ windows: [{}] });
+      if (args.includes("session.view")) return json({ windows: [{ window_id: "w:1" }] });
       throw new Error(`unexpected rex ${args.join(" ")}`);
     });
 
@@ -112,7 +117,7 @@ describe("loadItems", () => {
       if (program !== "rex") return emptyOptional(program);
       if (args[0] === "hosts") throw new Error('unknown command "hosts" for "rex"');
       if (isLocalLs(args)) return json({ sessions: [{ session_id: "session:local", label: "mine" }] });
-      if (args.includes("session.view")) return json({ windows: [{}] });
+      if (args.includes("session.view")) return json({ windows: [{ window_id: "w:1" }] });
       throw new Error(`unexpected rex ${args.join(" ")}`);
     });
 
@@ -183,7 +188,7 @@ describe("loadItems", () => {
       if (program !== "rex") return emptyOptional(program);
       if (args[0] === "hosts") return json({ hosts: [], warnings: ["home is away"] });
       if (isLocalLs(args)) return json({ sessions: [{ session_id: "session:local", label: "mine" }] });
-      if (args.includes("session.view")) return json({ windows: [{}] });
+      if (args.includes("session.view")) return json({ windows: [{ window_id: "w:1" }] });
       throw new Error(`unexpected rex ${args.join(" ")}`);
     });
 
@@ -243,6 +248,22 @@ describe("connect", () => {
   });
 });
 
+describe("selectTab", () => {
+  it("selects the session and its window through the local app", async () => {
+    const { run, calls } = fakeRun(() => "");
+    const remote = toRexItem({ session_id: "session:remote", label: "api" }, 2, "alpha");
+
+    await selectTab(run, remote.sessionId!, "window:two");
+
+    expect(calls).toEqual([
+      {
+        program: "rex",
+        args: ["do", "session.select", "session_id=session:remote", "window_id=window:two"],
+      },
+    ]);
+  });
+});
+
 describe("killSession", () => {
   it("targets the remote host that owns the session", async () => {
     const { run, calls } = fakeRun(() => "");
@@ -262,5 +283,58 @@ describe("killSession", () => {
     await killSession(run, local);
 
     expect(calls).toEqual([{ program: "rex", args: ["kill", "session:local"] }]);
+  });
+});
+
+describe("refresh loading", () => {
+  it("shares concurrent loads and permits another load after completion", async () => {
+    const { run, calls } = fakeRun(() => json({ sessions: [] }));
+    const first = loadItems(run, "/home/me", false, false);
+    const second = loadItems(run, "/home/me", false, false);
+    expect(second).toBe(first);
+    await Promise.all([first, second]);
+    expect(calls).toHaveLength(1);
+    await loadItems(run, "/home/me", false, false);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("bounds session views to four per host and preserves session order", async () => {
+    let active = 0;
+    let maximum = 0;
+    const sessions = Array.from({ length: 12 }, (_, i) => ({ session_id: `s:${i}`, label: `Session ${i}` }));
+    const { run } = fakeRun(async (_program, args) => {
+      if (isLocalLs(args)) return json({ sessions });
+      active++;
+      maximum = Math.max(maximum, active);
+      await Promise.resolve();
+      active--;
+      return json({ windows: [{ window_id: "w:1" }] });
+    });
+    const loaded = await loadItems(run, "/home/me", false, false);
+    expect(maximum).toBe(4);
+    expect(loaded.items.map((item) => item.sessionId)).toEqual(sessions.map((session) => session.session_id));
+  });
+
+  it.each([
+    [],
+    { windows: [{}] },
+    { session_id: "wrong", windows: [] },
+    { windows: [{ window_id: "w" }, { window_id: "w" }] },
+  ])("keeps a malformed view unavailable: %j", async (view) => {
+    const { run } = fakeRun((_program, args) =>
+      isLocalLs(args) ? json({ sessions: [{ session_id: "s:1", label: "Broken" }] }) : json(view),
+    );
+    const loaded = await loadItems(run, "/home/me", false, false);
+    expect(loaded.items[0].tabs).toBeUndefined();
+    expect(loaded.items[0].windows).toBeUndefined();
+  });
+
+  it.each([{}, { windows: null }, { windows: [] }])("accepts a session with no windows: %j", async (view) => {
+    const { run } = fakeRun((_program, args) =>
+      isLocalLs(args) ? json({ sessions: [{ session_id: "s:1", label: "Empty" }] }) : json(view),
+    );
+    const loaded = await loadItems(run, "/home/me", false, false);
+    expect(loaded.items[0].tabs).toEqual([]);
+    expect(loaded.items[0].windows).toBe(0);
   });
 });

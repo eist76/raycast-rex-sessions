@@ -4,6 +4,28 @@ import { basename } from "node:path";
 
 export type Kind = "rex" | "sesh" | "dir";
 
+/** A pane inside a tab, kept so the picker can read its working directory on demand. */
+export interface SessionPaneSummary {
+  blockId?: string;
+  label: string;
+  /** True for terminal blocks; other block types have no working directory. */
+  terminal: boolean;
+}
+
+/** A window from a session view, which Rex.app shows as a tab. */
+export interface SessionTabSummary {
+  windowId: string;
+  label: string;
+  /** True when this is the tab the session currently shows. */
+  active: boolean;
+  /** Labels of the blocks in this tab, in Rex's layout order. */
+  paneLabels: string[];
+  /** Includes panes that have no label. Optional for older cached summaries. */
+  paneCount?: number;
+  /** Pane details for lazy working-directory reads. Optional for older cached summaries. */
+  panes?: SessionPaneSummary[];
+}
+
 export interface Item {
   id: string;
   kind: Kind;
@@ -14,6 +36,8 @@ export interface Item {
   sessionId?: string;
   startup?: string;
   windows?: number;
+  /** The session's tabs, or absent when its view could not be read. */
+  tabs?: SessionTabSummary[];
   /** The Rex host label; absent for sessions on this Mac. */
   server?: string;
 }
@@ -56,7 +80,7 @@ export interface SeshEntry {
   StartupCommand?: string;
 }
 
-export function toRexItem(session: RexSession, windows?: number, server?: string): Item {
+export function toRexItem(session: RexSession, windows?: number, server?: string, tabs?: SessionTabSummary[]): Item {
   return {
     id: server ? `rex:${server}:${session.session_id}` : `rex:${session.session_id}`,
     kind: "rex",
@@ -64,8 +88,58 @@ export function toRexItem(session: RexSession, windows?: number, server?: string
     label: session.label,
     sessionId: session.session_id,
     windows,
+    tabs,
     server,
   };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+/** Keep the tab labels and pane labels a session view already returned, ignoring malformed windows. */
+export function toTabSummaries(windows: unknown, activeWindowId?: unknown): SessionTabSummary[] {
+  if (!Array.isArray(windows)) return [];
+  const active = typeof activeWindowId === "string" ? activeWindowId : undefined;
+  const tabs: SessionTabSummary[] = [];
+  const seen = new Set<string>();
+  windows.forEach((rawWindow, index) => {
+    const window = objectRecord(rawWindow);
+    if (!window || typeof window.window_id !== "string" || !window.window_id) return;
+    if (seen.has(window.window_id)) return;
+    seen.add(window.window_id);
+    const paneLabels: string[] = [];
+    const panes: SessionPaneSummary[] = [];
+    const layers = Array.isArray(window.layers) ? window.layers : [];
+    for (const rawLayer of layers) {
+      const layer = objectRecord(rawLayer);
+      const blocks = layer && Array.isArray(layer.blocks) ? layer.blocks : [];
+      for (const rawBlock of blocks) {
+        const block = objectRecord(rawBlock);
+        if (!block) continue;
+        const blockId = typeof block.block_id === "string" && block.block_id ? block.block_id : undefined;
+        const label = typeof block.label === "string" && block.label.trim() ? block.label : `Pane ${panes.length + 1}`;
+        const creator = typeof block.creator_name === "string" ? block.creator_name : "";
+        const flavor = typeof block.flavor === "string" ? block.flavor : "";
+        panes.push({
+          blockId,
+          label,
+          terminal: creator === "com.superlogical.terminal" || flavor.startsWith("com.superlogical.terminal."),
+        });
+        paneLabels.push(label);
+      }
+    }
+    const label = typeof window.label === "string" && window.label.trim() ? window.label : `Tab ${index + 1}`;
+    tabs.push({
+      windowId: window.window_id,
+      label,
+      active: window.window_id === active,
+      paneLabels,
+      paneCount: panes.length,
+      panes,
+    });
+  });
+  return tabs;
 }
 
 export function toSeshItems(entries: SeshEntry[]): Item[] {
