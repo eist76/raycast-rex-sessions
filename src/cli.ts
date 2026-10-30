@@ -230,13 +230,69 @@ async function loadItemsUncached(
   };
 }
 
+interface RexClientEntry {
+  client_id?: unknown;
+  info?: { kind?: unknown; platform?: unknown };
+  principal?: { transport?: unknown; uid?: unknown };
+  connection_state?: unknown;
+}
+
+/**
+ * The Rex app on this Mac when several app clients (for example a phone) are connected.
+ * Only a local macOS app over the Unix socket can be brought to the front here.
+ */
+async function localAppClientId(run: Run): Promise<string | undefined> {
+  let parsed: { clients?: unknown } | null;
+  try {
+    parsed = JSON.parse(await run("rex", ["client", "ls", "--json"])) as { clients?: unknown } | null;
+  } catch {
+    return undefined;
+  }
+  if (!parsed || !Array.isArray(parsed.clients)) return undefined;
+
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const matches: string[] = [];
+  for (const raw of parsed.clients) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const client = raw as RexClientEntry;
+    if (!client.info || !client.principal) continue;
+    if (client.info.kind !== "app") continue;
+    const platform = typeof client.info.platform === "string" ? client.info.platform.toLowerCase() : "";
+    if (platform !== "macos" && platform !== "darwin") continue;
+    const transport = typeof client.principal.transport === "string" ? client.principal.transport.toLowerCase() : "";
+    if (!transport.startsWith("unix")) continue;
+    if (uid !== undefined && typeof client.principal.uid === "number" && client.principal.uid !== uid) continue;
+    if (client.connection_state !== undefined && client.connection_state !== "connected") continue;
+    if (typeof client.client_id === "string" && client.client_id) matches.push(client.client_id);
+  }
+
+  if (matches.length > 1) {
+    throw new Error("Multiple Rex app clients on this Mac are connected. Close one or label the intended app.");
+  }
+  return matches[0];
+}
+
+/** Select a session through the local app, retrying with it by ID when the default client is ambiguous. */
+async function runSessionSelect(run: Run, sessionId: string, windowId?: string): Promise<void> {
+  const args = ["do", "session.select", `session_id=${sessionId}`];
+  if (windowId) args.push(`window_id=${windowId}`);
+  try {
+    await run("rex", args);
+  } catch (error) {
+    if (!/client target default is ambiguous/i.test(errorText(error))) throw error;
+    const client = await localAppClientId(run);
+    if (!client) throw error;
+    await run("rex", ["-C", client, ...args]);
+  }
+}
+
 /** Show the item's session in the Rex app, creating it first when it isn't open. */
 export async function connect(run: Run, item: Item, shell: string): Promise<void> {
   if (item.server) {
     // The local app is connected to the configured hosts too, so it can select the remote
     // session by ID. Running `rex --server HOST do` would target that host's own app instead.
     if (!item.sessionId) throw new Error(`Remote session ${item.label} has no session ID`);
-    await run("rex", ["do", "session.select", `session_id=${item.sessionId}`]);
+    await runSessionSelect(run, item.sessionId);
     return;
   }
   // The list may be stale, so check the live sessions before creating one.
@@ -246,12 +302,12 @@ export async function connect(run: Run, item: Item, shell: string): Promise<void
     const created = JSON.parse(await run("rex", newSessionArgs(item, shell))) as { session_id: string };
     sessionId = created.session_id;
   }
-  await run("rex", ["do", "session.select", `session_id=${sessionId}`]);
+  await runSessionSelect(run, sessionId);
 }
 
 /** Show one tab of a session in the Rex app, including a tab on a remote host. */
 export async function selectTab(run: Run, sessionId: string, windowId: string): Promise<void> {
-  await run("rex", ["do", "session.select", `session_id=${sessionId}`, `window_id=${windowId}`]);
+  await runSessionSelect(run, sessionId, windowId);
 }
 
 export async function killSession(run: Run, item: Item): Promise<void> {

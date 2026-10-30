@@ -262,6 +262,73 @@ describe("selectTab", () => {
       },
     ]);
   });
+
+  it("retries through the local Mac app when several app clients are connected", async () => {
+    let attempts = 0;
+    const { run, calls } = fakeRun((_program, args) => {
+      const joined = args.join(" ");
+      if (joined.endsWith("do session.select session_id=session:remote window_id=window:two")) {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("client target default is ambiguous: multiple app clients are connected");
+        }
+        return "";
+      }
+      if (joined === "client ls --json") {
+        return json({
+          clients: [
+            {
+              client_id: "client:mac",
+              info: { kind: "app", platform: "macos" },
+              principal: { transport: "unix", uid: process.getuid?.() },
+              connection_state: "connected",
+            },
+            {
+              client_id: "client:phone",
+              info: { kind: "app", platform: "ios" },
+              principal: { transport: "tailscale", uid: process.getuid?.() },
+              connection_state: "connected",
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected rex ${joined}`);
+    });
+
+    await selectTab(run, "session:remote", "window:two");
+
+    expect(calls.map((call) => call.args)).toEqual([
+      ["do", "session.select", "session_id=session:remote", "window_id=window:two"],
+      ["client", "ls", "--json"],
+      ["-C", "client:mac", "do", "session.select", "session_id=session:remote", "window_id=window:two"],
+    ]);
+  });
+
+  it("refuses to guess between two local Mac app clients", async () => {
+    const { run } = fakeRun((_program, args) => {
+      if (args.includes("session.select")) {
+        throw new Error("client target default is ambiguous: multiple app clients are connected");
+      }
+      return json({
+        clients: [
+          {
+            client_id: "client:one",
+            info: { kind: "app", platform: "macos" },
+            principal: { transport: "unix", uid: process.getuid?.() },
+            connection_state: "connected",
+          },
+          {
+            client_id: "client:two",
+            info: { kind: "app", platform: "macos" },
+            principal: { transport: "unix", uid: process.getuid?.() },
+            connection_state: "connected",
+          },
+        ],
+      });
+    });
+
+    await expect(selectTab(run, "session:remote", "window:two")).rejects.toThrow("Multiple Rex app clients");
+  });
 });
 
 describe("killSession", () => {
