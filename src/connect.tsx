@@ -19,7 +19,7 @@ import {
   Toast,
 } from "@raycast/api";
 import { showFailureToast, useCachedPromise, useCachedState } from "@raycast/utils";
-import { connect, killSession, loadItems, runner, selectTab } from "./cli";
+import { connect, createTab, killSession, loadItems, runner, selectTab } from "./cli";
 import RenameSessionForm from "./rename-session-form";
 import NewSessionForm from "./new-session-form";
 import HostConnectionView from "./host-connection-view";
@@ -129,6 +129,20 @@ export default function ConnectCommand() {
       await closeMainWindow({ clearRootSearch: true });
     } catch (error) {
       await showFailureToast(error, { title: `Couldn't open ${item.label}${where}` });
+    }
+  }
+
+  async function onNewTab(item: Item, cwd?: string) {
+    const where = item.server ? ` on ${item.server}` : "";
+    const toast = await showToast({ style: Toast.Style.Animated, title: `Creating a tab in ${item.label}${where}` });
+    try {
+      await createTab(run, item, cwd);
+      revalidate();
+      await open(prefs.rexApp);
+      await toast.hide();
+      await closeMainWindow({ clearRootSearch: true });
+    } catch (error) {
+      await showFailureToast(error, { title: `Couldn't create a tab in ${item.label}${where}` });
     }
   }
 
@@ -351,6 +365,14 @@ export default function ConnectCommand() {
                     )}
                     {hostConnectionAction(item.server)}
                     {newSessionAction(item.server)}
+                    {item.kind === "rex" && item.sessionId && (
+                      <Action
+                        title="New Tab"
+                        icon={Icon.Plus}
+                        shortcut={{ modifiers: ["cmd"], key: "t" }}
+                        onAction={() => onNewTab(item, item.id === selectedItemId ? selectedCwd : undefined)}
+                      />
+                    )}
                     {refresh}
                     {showTabChoice && (
                       <ActionPanel.Section title="Tabs">

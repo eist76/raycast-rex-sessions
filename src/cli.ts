@@ -310,6 +310,27 @@ export async function selectTab(run: Run, sessionId: string, windowId: string): 
   await runSessionSelect(run, sessionId, windowId);
 }
 
+/** Create a new tab (Rex window) in a session on its owning host and show it in the app. */
+export async function createTab(run: Run, item: Item, cwd?: string): Promise<void> {
+  if (item.kind !== "rex" || !item.sessionId) {
+    throw new Error(`Only Rex sessions can create a tab; ${item.label} is a ${item.kind} entry`);
+  }
+  const args = [
+    ...serverArgs(item.server),
+    "window",
+    "new",
+    "-s",
+    item.sessionId,
+    ...(cwd ? ["-c", cwd] : []),
+    "--json",
+  ];
+  const parsed = JSON.parse(await run("rex", args)) as { window_id?: unknown } | null;
+  if (!parsed || typeof parsed !== "object" || typeof parsed.window_id !== "string" || !parsed.window_id) {
+    throw new Error("Invalid Rex window response");
+  }
+  await runSessionSelect(run, item.sessionId, parsed.window_id);
+}
+
 export async function killSession(run: Run, item: Item): Promise<void> {
   if (!item.sessionId) return;
   const args = item.server

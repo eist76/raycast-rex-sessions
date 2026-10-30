@@ -34,6 +34,7 @@ reached is shown as a warning while the rest of the list stays available.
 | <kbd>Enter</kbd>                       | Open or create the session         |
 | <kbd>⌥</kbd> <kbd>←</kbd> / <kbd>⌥</kbd> <kbd>→</kbd> | Choose previous / next tab |
 | <kbd>⌘</kbd> <kbd>N</kbd>              | New local or remote session        |
+| <kbd>⌘</kbd> <kbd>T</kbd>              | New tab in the selected session    |
 | <kbd>⌘</kbd> <kbd>E</kbd>              | Rename the selected session        |
 | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>F</kbd> | Pin or unpin the selected session  |
 | <kbd>⌘</kbd> <kbd>I</kbd>              | Session details                    |
@@ -55,6 +56,9 @@ and startup command. Paths and commands run on the selected machine. After the
 startup command finishes, the host's interactive shell stays open. The new
 session opens in Rex immediately. If opening fails after creation, retrying opens
 the existing session rather than creating another one.
+
+**New Tab** (⌘T) adds another tab to the selected session and opens it in Rex.
+When the selected tab's working directory is known, the new tab starts there.
 
 **Rename Session** (⌘E) changes the selected session's name on its owning host.
 

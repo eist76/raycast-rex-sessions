@@ -1,7 +1,7 @@
 // ABOUTME: Focused tests for discovering local and remote sessions and targeting the right server.
 // ABOUTME: Every Rex call is mocked; no test touches a real session or host.
 import { describe, expect, it } from "vitest";
-import { connect, killSession, loadItems, Run, selectTab } from "./cli";
+import { connect, createTab, killSession, loadItems, Run, selectTab } from "./cli";
 import { toRexItem, toSeshItems } from "./items";
 
 interface Call {
@@ -328,6 +328,60 @@ describe("selectTab", () => {
     });
 
     await expect(selectTab(run, "session:remote", "window:two")).rejects.toThrow("Multiple Rex app clients");
+  });
+});
+
+describe("createTab", () => {
+  it("creates a tab on the remote host and shows it through the local app", async () => {
+    const { run, calls } = fakeRun((_program, args) => {
+      const joined = args.join(" ");
+      if (joined === "--server alpha --autostart=false window new -s session:remote -c /srv/app --json") {
+        return json({ window_id: "window:new", block_ids: ["block:new"], revision: 2 });
+      }
+      if (joined === "do session.select session_id=session:remote window_id=window:new") return "";
+      throw new Error(`unexpected rex ${joined}`);
+    });
+    const remote = toRexItem({ session_id: "session:remote", label: "api" }, 1, "alpha");
+
+    await createTab(run, remote, "/srv/app");
+
+    expect(calls.map((call) => call.args)).toEqual([
+      ["--server", "alpha", "--autostart=false", "window", "new", "-s", "session:remote", "-c", "/srv/app", "--json"],
+      ["do", "session.select", "session_id=session:remote", "window_id=window:new"],
+    ]);
+  });
+
+  it("creates a local tab without a directory", async () => {
+    const { run, calls } = fakeRun((_program, args) => {
+      const joined = args.join(" ");
+      if (joined === "--autostart=false window new -s session:local --json") {
+        return json({ window_id: "window:local", block_ids: [], revision: 3 });
+      }
+      if (joined === "do session.select session_id=session:local window_id=window:local") return "";
+      throw new Error(`unexpected rex ${joined}`);
+    });
+    const local = toRexItem({ session_id: "session:local", label: "mine" });
+
+    await createTab(run, local);
+
+    expect(calls.map((call) => call.args)).toEqual([
+      ["--autostart=false", "window", "new", "-s", "session:local", "--json"],
+      ["do", "session.select", "session_id=session:local", "window_id=window:local"],
+    ]);
+  });
+
+  it("rejects a window response without an ID", async () => {
+    const { run } = fakeRun(() => json({ block_ids: [], revision: 1 }));
+    const local = toRexItem({ session_id: "session:local", label: "mine" });
+
+    await expect(createTab(run, local)).rejects.toThrow("Invalid Rex window response");
+  });
+
+  it("rejects entries that are not Rex sessions", async () => {
+    const { run } = fakeRun(() => "");
+    const [entry] = toSeshItems([{ Name: "files", Path: "/work/files" }]);
+
+    await expect(createTab(run, entry)).rejects.toThrow("Only Rex sessions can create a tab");
   });
 });
 
