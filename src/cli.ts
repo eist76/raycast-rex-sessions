@@ -279,7 +279,7 @@ async function runSessionSelect(run: Run, sessionId: string, windowId?: string):
   try {
     await run("rex", args);
   } catch (error) {
-    if (!/client target default is ambiguous/i.test(errorText(error))) throw error;
+    if (!/client target.*ambiguous/i.test(errorText(error))) throw error;
     const client = await localAppClientId(run);
     if (!client) throw error;
     await run("rex", ["-C", client, ...args]);
